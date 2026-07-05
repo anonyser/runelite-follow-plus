@@ -9,10 +9,16 @@ public interface FollowPlusConfig extends Config
 {
 	String GROUP = "followplus";
 
+	// Config tooltips render as HTML (ConfigPanel wraps name + description in <html> tags), so
+	// <br> gives real line breaks — without them a long tooltip runs off the screen in one line.
+
 	@ConfigItem(
 		keyName = "followAtTop",
 		name = "Follow at the Top",
-		description = "Move the Follow option above Attack, Trade, Walk here and the rest when right-clicking another player",
+		description = "Move the Follow option to the top when you<br>"
+			+ "right-click another player, above Attack,<br>"
+			+ "Trade, Walk here and the rest, so you don't<br>"
+			+ "misclick when you only want to follow.",
 		position = 0
 	)
 	default boolean followAtTop()
@@ -23,18 +29,24 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showOverlay",
 		name = "Show overlay",
-		description = "Show the Follow Plus status overlay inside the game window",
+		description = "Draw the status overlay inside the game<br>"
+			+ "window. Off by default in favour of the<br>"
+			+ "external window, so you can minimise the<br>"
+			+ "client and still see it.",
 		position = 1
 	)
 	default boolean showOverlay()
 	{
-		return true;
+		return false;
 	}
 
 	@ConfigItem(
 		keyName = "externalWindow",
 		name = "External window",
-		description = "Show a separate always-on-top window with the same status info, visible even when RuneLite is behind other windows (drag it to move, position is remembered)",
+		description = "Show the status in a separate always-on-top<br>"
+			+ "window that stays visible when RuneLite is<br>"
+			+ "behind other windows. Drag it to move it;<br>"
+			+ "its position is remembered.",
 		position = 2
 	)
 	default boolean externalWindow()
@@ -45,8 +57,10 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showFollowingStatus",
 		name = "Show following status",
-		description = "Show who you are currently following in the overlay",
-		position = 2
+		description = "Show who you are currently following, or<br>"
+			+ "\"Not following anyone\" in red when you<br>"
+			+ "are not.",
+		position = 3
 	)
 	default boolean showFollowingStatus()
 	{
@@ -56,8 +70,10 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showPrayerTimer",
 		name = "Show prayer depletion timer",
-		description = "Show active prayers, prayer points and an estimated time until prayer reaches zero",
-		position = 3
+		description = "Show your active prayers, prayer points<br>"
+			+ "and how long your prayer will last at the<br>"
+			+ "current drain.",
+		position = 4
 	)
 	default boolean showPrayerTimer()
 	{
@@ -67,8 +83,10 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showActivityTimer",
 		name = "Show Soul Wars activity timer",
-		description = "Inside Soul Wars, show the activity bar and an estimated time until it reaches zero",
-		position = 4
+		description = "In Soul Wars, show the activity bar and<br>"
+			+ "how long until it runs out if you stay<br>"
+			+ "idle. Shows Unknown when it can't be read.",
+		position = 5
 	)
 	default boolean showActivityTimer()
 	{
@@ -78,8 +96,10 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showGameTimer",
 		name = "Show Soul Wars game timer",
-		description = "Inside Soul Wars, show the estimated match time remaining",
-		position = 5
+		description = "In Soul Wars, show the time left in the<br>"
+			+ "current game. Shows Unknown when it can't<br>"
+			+ "be read.",
+		position = 6
 	)
 	default boolean showGameTimer()
 	{
@@ -89,8 +109,10 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showLobbyInfo",
 		name = "Show Soul Wars lobby info",
-		description = "In the Soul Wars lobby, show how many players are waiting and the next game start time",
-		position = 6
+		description = "In the Soul Wars lobby, show how many<br>"
+			+ "players are waiting and the time until the<br>"
+			+ "next game starts.",
+		position = 7
 	)
 	default boolean showLobbyInfo()
 	{
@@ -100,8 +122,9 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showHpWarning",
 		name = "Show hitpoints and combat warning",
-		description = "Show current hitpoints and a warning while you are being attacked",
-		position = 7
+		description = "Show your current and maximum hitpoints,<br>"
+			+ "plus a warning when you are being attacked.",
+		position = 8
 	)
 	default boolean showHpWarning()
 	{
@@ -111,8 +134,10 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "debugLogging",
 		name = "Debug logging",
-		description = "Log menu reordering, follow changes and Soul Wars widget contents to the client log",
-		position = 8
+		description = "Log menu reordering, follow changes and<br>"
+			+ "Soul Wars widget contents to the client<br>"
+			+ "log. For pinning down unknown widgets.",
+		position = 9
 	)
 	default boolean debugLogging()
 	{
