@@ -113,10 +113,10 @@ class FollowPlusOverlay extends OverlayPanel
 
 		if (config.showLobbyInfo() && !inGame && plugin.isInSoulWarsLobby())
 		{
-			final int waiting = plugin.getWaitingPlayers();
-			addLine("Players waiting", waiting >= 0 ? String.valueOf(waiting) : "Unknown", null);
-			final int nextGame = plugin.getLobbySecondsLeft();
-			addLine("Next game in", nextGame >= 0 ? TimeFormat.mmss(nextGame) : "Unknown", null);
+			final String waiting = plugin.getPlayersWaitingText();
+			addLine("Players waiting", waiting != null ? waiting : "Unknown", null);
+			final String nextGame = plugin.getNextGameText();
+			addLine("Next game", nextGame != null ? nextGame : "Unknown", null);
 		}
 
 		if (inGame)

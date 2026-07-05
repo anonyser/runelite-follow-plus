@@ -87,7 +87,6 @@ public class FollowPlusPlugin extends Plugin
 	private final UnderAttackTracker underAttack = new UnderAttackTracker(HIT_WINDOW_TICKS);
 	private final ActivityDecayEstimator activityEstimator = new ActivityDecayEstimator();
 	private final GameTimerTracker gameTimer = new GameTimerTracker();
-	private final GameTimerTracker lobbyTimer = new GameTimerTracker();
 
 	// Follow state
 	private String followTargetName;
@@ -105,8 +104,8 @@ public class FollowPlusPlugin extends Plugin
 	private double activitySecondsLeft = -1;
 	private int gameSecondsLeft = -1;
 	private boolean inLobby;
-	private int waitingPlayers = -1;
-	private int lobbySecondsLeft = -1;
+	private String playersWaitingText;
+	private String nextGameText;
 
 	@Override
 	protected void startUp()
@@ -329,7 +328,7 @@ public class FollowPlusPlugin extends Plugin
 		}
 
 		String prayer = null;
-		String prayers = null;
+		List<String> prayerNames = null;
 		if (config.showPrayerTimer())
 		{
 			final int points = client.getBoostedSkillLevel(Skill.PRAYER);
@@ -341,7 +340,7 @@ public class FollowPlusPlugin extends Plugin
 			}
 			if (!activePrayerNames.isEmpty())
 			{
-				prayers = String.join(", ", activePrayerNames);
+				prayerNames = new ArrayList<>(activePrayerNames);
 			}
 		}
 
@@ -362,12 +361,12 @@ public class FollowPlusPlugin extends Plugin
 		}
 		else if (inLobby && config.showLobbyInfo())
 		{
-			swLine1 = "Players waiting: " + (waitingPlayers >= 0 ? String.valueOf(waitingPlayers) : "Unknown");
-			swLine2 = "Next game: " + (lobbySecondsLeft >= 0 ? TimeFormat.mmss(lobbySecondsLeft) : "Unknown");
+			swLine1 = "Players waiting: " + (playersWaitingText != null ? playersWaitingText : "Unknown");
+			swLine2 = "Next game: " + (nextGameText != null ? nextGameText : "Unknown");
 		}
 
 		final FollowPlusWindow.Snapshot snap = new FollowPlusWindow.Snapshot(
-			inGame, following, followingColor, hp, warning, warningColor, prayer, prayers, swLine1, swLine2);
+			inGame, following, followingColor, hp, warning, warningColor, prayer, prayerNames, swLine1, swLine2);
 		SwingUtilities.invokeLater(() -> w.update(snap));
 	}
 
@@ -391,7 +390,6 @@ public class FollowPlusPlugin extends Plugin
 				soulWarsTeam = team;
 				activityEstimator.reset();
 				gameTimer.reset();
-				lobbyTimer.reset();
 				activityValue = team != 0 ? client.getVarbitValue(VarbitID.SOUL_WARS_ACTIVITY_VALUE) : -1;
 			}
 		}
@@ -555,8 +553,8 @@ public class FollowPlusPlugin extends Plugin
 		if (soulWarsTeam != 0)
 		{
 			inLobby = false;
-			waitingPlayers = -1;
-			lobbySecondsLeft = -1;
+			playersWaitingText = null;
+			nextGameText = null;
 			final double ticksToZero = activityEstimator.ticksToZero(tickCount);
 			activitySecondsLeft = ticksToZero < 0 ? -1 : ticksToZero * 0.6;
 			if (config.showGameTimer())
@@ -579,8 +577,8 @@ public class FollowPlusPlugin extends Plugin
 		else
 		{
 			inLobby = false;
-			waitingPlayers = -1;
-			lobbySecondsLeft = -1;
+			playersWaitingText = null;
+			nextGameText = null;
 		}
 	}
 
@@ -603,31 +601,19 @@ public class FollowPlusPlugin extends Plugin
 	}
 
 	/**
-	 * Same discovery approach for the lobby board (interface 434): its layout isn't verified,
-	 * so any counting-down time becomes "next game" via its own lock-on tracker, and the
-	 * waiting count is taken from texts that mention players/waiting - one line per team is
-	 * the likely layout, so multiple matches are summed. Anything unread stays "Unknown".
+	 * The lobby board (interface 434) holds its labels and values in separate, consecutive widgets
+	 * ("Players Waiting" then "5/20" or "28", "Next Game Start" then "-" or "3 minutes" - verified
+	 * live), so the texts are collected in reading order and paired by SoulWarsLobbyReader, which
+	 * mirrors each value verbatim. Missing values stay "Unknown".
 	 */
 	private void scanLobbyWidgets()
 	{
-		final long now = System.currentTimeMillis();
-		final int[] waitingSum = {-1};
-		final int visible = forEachWidgetText(InterfaceID.SOUL_WARS_LOBBY, (key, text) ->
-		{
-			final int seconds = SoulWarsTimeParser.parseTimeSeconds(text);
-			final int count = SoulWarsLobbyParser.parsePlayerCount(text);
-			if (seconds >= 0)
-			{
-				lobbyTimer.observe(key, seconds, now);
-			}
-			if (count >= 0)
-			{
-				waitingSum[0] = waitingSum[0] < 0 ? count : waitingSum[0] + count;
-			}
-		});
+		final List<String> texts = new ArrayList<>();
+		final int visible = forEachWidgetText(InterfaceID.SOUL_WARS_LOBBY, (key, text) -> texts.add(text));
 		inLobby = visible > 0;
-		waitingPlayers = waitingSum[0];
-		lobbySecondsLeft = lobbyTimer.getSeconds(now);
+		final SoulWarsLobbyReader.Result r = SoulWarsLobbyReader.read(texts);
+		playersWaitingText = r.playersWaiting;
+		nextGameText = r.nextGame;
 	}
 
 	private interface TextVisitor
@@ -690,7 +676,6 @@ public class FollowPlusPlugin extends Plugin
 		underAttack.reset();
 		activityEstimator.reset();
 		gameTimer.reset();
-		lobbyTimer.reset();
 		attackStatus = UnderAttackTracker.Status.NONE;
 		activePrayerNames.clear();
 		activeDrainEffect = 0;
@@ -700,8 +685,8 @@ public class FollowPlusPlugin extends Plugin
 		activitySecondsLeft = -1;
 		gameSecondsLeft = -1;
 		inLobby = false;
-		waitingPlayers = -1;
-		lobbySecondsLeft = -1;
+		playersWaitingText = null;
+		nextGameText = null;
 	}
 
 	private boolean isFollowEntry(MenuEntry entry)
@@ -832,13 +817,13 @@ public class FollowPlusPlugin extends Plugin
 		return inLobby;
 	}
 
-	int getWaitingPlayers()
+	String getPlayersWaitingText()
 	{
-		return waitingPlayers;
+		return playersWaitingText;
 	}
 
-	int getLobbySecondsLeft()
+	String getNextGameText()
 	{
-		return lobbySecondsLeft;
+		return nextGameText;
 	}
 }

@@ -9,6 +9,7 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JFrame;
@@ -47,12 +48,12 @@ class FollowPlusWindow extends JFrame
 		final String warning;
 		final Color warningColor;
 		final String prayer;
-		final String prayers;
+		final List<String> prayerNames;
 		final String swLine1;
 		final String swLine2;
 
 		Snapshot(boolean inGame, String following, Color followingColor, String hp,
-			String warning, Color warningColor, String prayer, String prayers,
+			String warning, Color warningColor, String prayer, List<String> prayerNames,
 			String swLine1, String swLine2)
 		{
 			this.inGame = inGame;
@@ -62,7 +63,7 @@ class FollowPlusWindow extends JFrame
 			this.warning = warning;
 			this.warningColor = warningColor;
 			this.prayer = prayer;
-			this.prayers = prayers;
+			this.prayerNames = prayerNames;
 			this.swLine1 = swLine1;
 			this.swLine2 = swLine2;
 		}
@@ -81,6 +82,7 @@ class FollowPlusWindow extends JFrame
 
 	private Point dragPoint;
 	private boolean structureChanged;
+	private List<String> lastPrayers;
 
 	FollowPlusWindow(ConfigManager configManager)
 	{
@@ -173,7 +175,7 @@ class FollowPlusWindow extends JFrame
 		setLine(hpLabel, s.hp, FG);
 		setLine(warningLabel, s.warning, s.warningColor);
 		setLine(prayerLabel, s.prayer, FG);
-		setLine(prayersLabel, s.prayers, MUTED);
+		setPrayers(s.prayerNames);
 		setLine(swLabel1, s.swLine1, FG);
 		setLine(swLabel2, s.swLine2, FG);
 		if (structureChanged)
@@ -199,6 +201,38 @@ class FollowPlusWindow extends JFrame
 				label.setForeground(color);
 			}
 		}
+	}
+
+	/**
+	 * Active prayers, one bullet per line like the in-client overlay. A single fixed-width label
+	 * would truncate a long list, so each prayer gets its own line via an HTML label and the
+	 * window re-packs to grow when the number of lines changes.
+	 */
+	private void setPrayers(List<String> names)
+	{
+		final boolean visible = names != null && !names.isEmpty();
+		if (prayersLabel.isVisible() != visible)
+		{
+			prayersLabel.setVisible(visible);
+			structureChanged = true;
+		}
+		if (visible && !names.equals(lastPrayers))
+		{
+			final StringBuilder sb = new StringBuilder("<html>");
+			for (int i = 0; i < names.size(); i++)
+			{
+				if (i > 0)
+				{
+					sb.append("<br>");
+				}
+				sb.append("· ").append(names.get(i));
+			}
+			sb.append("</html>");
+			prayersLabel.setText(sb.toString());
+			// the line count may have changed, so the window must re-pack to fit
+			structureChanged = true;
+		}
+		lastPrayers = names;
 	}
 
 	private static JLabel makeLabel(String text, Color color)
