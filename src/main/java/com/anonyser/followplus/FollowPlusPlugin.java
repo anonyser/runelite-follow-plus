@@ -13,7 +13,6 @@ import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
-import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.Skill;
@@ -21,10 +20,8 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemContainerChanged;
-import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.PlayerDespawned;
-import net.runelite.api.events.PostMenuSort;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
@@ -42,9 +39,9 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
-	name = "Follow Plus",
-	description = "Puts Follow at the top of player menus and shows follow, prayer and Soul Wars status in a small overlay",
-	tags = {"follow", "soul wars", "taxi", "prayer", "overlay"}
+	name = "Soul Wars Status",
+	description = "Soul Wars status overlay: follow status, HP, prayer depletion, activity, game and lobby timers",
+	tags = {"soul wars", "taxi", "prayer", "overlay", "follow", "lobby"}
 )
 public class FollowPlusPlugin extends Plugin
 {
@@ -185,56 +182,6 @@ public class FollowPlusPlugin extends Plugin
 	FollowPlusConfig provideConfig(ConfigManager configManager)
 	{
 		return configManager.getConfig(FollowPlusConfig.class);
-	}
-
-	@Subscribe
-	public void onMenuOpened(MenuOpened event)
-	{
-		// The open right-click menu: put Follow at the top of the list.
-		if (config.followAtTop())
-		{
-			followsToTop(event.getMenuEntries());
-		}
-	}
-
-	@Subscribe
-	public void onPostMenuSort(PostMenuSort event)
-	{
-		// The closed/hover menu: the top entry is what left-click runs, so putting Follow on
-		// top here makes left-clicking a player follow them. The client stops rebuilding the
-		// menu while it is open, so skip that case (onMenuOpened handles the open menu) or the
-		// swap would fight itself. Mirrors the core Menu Entry Swapper's PostMenuSort approach.
-		if (config.leftClickFollow() && !client.isMenuOpen())
-		{
-			followsToTop(client.getMenu().getMenuEntries());
-		}
-	}
-
-	/** Reorders the given entries so Follow options on other players sit at the top (= left-click). */
-	private void followsToTop(MenuEntry[] entries)
-	{
-		final boolean[] isFollow = new boolean[entries.length];
-		boolean any = false;
-		for (int i = 0; i < entries.length; i++)
-		{
-			isFollow[i] = isFollowEntry(entries[i]);
-			any |= isFollow[i];
-		}
-		if (!any)
-		{
-			return;
-		}
-		final int[] order = FollowMenuSorter.followsToTop(isFollow);
-		if (order == null)
-		{
-			return;
-		}
-		final MenuEntry[] sorted = new MenuEntry[entries.length];
-		for (int i = 0; i < entries.length; i++)
-		{
-			sorted[i] = entries[order[i]];
-		}
-		client.getMenu().setMenuEntries(sorted);
 	}
 
 	@Subscribe
@@ -687,16 +634,6 @@ public class FollowPlusPlugin extends Plugin
 		inLobby = false;
 		playersWaitingText = null;
 		nextGameText = null;
-	}
-
-	private boolean isFollowEntry(MenuEntry entry)
-	{
-		if (!isPlayerOption(entry.getType()) || !"Follow".equalsIgnoreCase(entry.getOption()))
-		{
-			return false;
-		}
-		final Player p = entry.getPlayer();
-		return p != null && p != client.getLocalPlayer();
 	}
 
 	private static boolean isPlayerOption(MenuAction action)

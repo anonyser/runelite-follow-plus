@@ -88,7 +88,7 @@ class FollowPlusWindow extends JFrame
 	{
 		this.configManager = configManager;
 
-		setTitle("Follow Plus");
+		setTitle("Soul Wars Status");
 		setUndecorated(true);
 		setAlwaysOnTop(true);
 		setType(Type.NORMAL);
@@ -111,7 +111,7 @@ class FollowPlusWindow extends JFrame
 			BorderFactory.createLineBorder(BORDER),
 			BorderFactory.createEmptyBorder(6, 10, 8, 10)));
 
-		final JLabel title = makeLabel("Follow Plus", MUTED);
+		final JLabel title = makeLabel("Soul Wars Status", MUTED);
 		content.add(title);
 		statusLabel.setFont(statusLabel.getFont().deriveFont(Font.BOLD));
 		content.add(statusLabel);

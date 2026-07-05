@@ -46,7 +46,7 @@ class FollowPlusOverlay extends OverlayPanel
 
 		panelComponent.getChildren().clear();
 		panelComponent.setPreferredSize(new Dimension(190, 0));
-		panelComponent.getChildren().add(TitleComponent.builder().text("Follow Plus").build());
+		panelComponent.getChildren().add(TitleComponent.builder().text("Soul Wars Status").build());
 
 		// simple at-a-glance state: green = in a Soul Wars game, red = not
 		final boolean inGame = plugin.isInSoulWars();
