@@ -24,6 +24,7 @@ import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.PlayerDespawned;
+import net.runelite.api.events.PostMenuSort;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
@@ -190,11 +191,29 @@ public class FollowPlusPlugin extends Plugin
 	@Subscribe
 	public void onMenuOpened(MenuOpened event)
 	{
-		if (!config.followAtTop())
+		// The open right-click menu: put Follow at the top of the list.
+		if (config.followAtTop())
 		{
-			return;
+			followsToTop(event.getMenuEntries());
 		}
-		final MenuEntry[] entries = event.getMenuEntries();
+	}
+
+	@Subscribe
+	public void onPostMenuSort(PostMenuSort event)
+	{
+		// The closed/hover menu: the top entry is what left-click runs, so putting Follow on
+		// top here makes left-clicking a player follow them. The client stops rebuilding the
+		// menu while it is open, so skip that case (onMenuOpened handles the open menu) or the
+		// swap would fight itself. Mirrors the core Menu Entry Swapper's PostMenuSort approach.
+		if (config.leftClickFollow() && !client.isMenuOpen())
+		{
+			followsToTop(client.getMenu().getMenuEntries());
+		}
+	}
+
+	/** Reorders the given entries so Follow options on other players sit at the top (= left-click). */
+	private void followsToTop(MenuEntry[] entries)
+	{
 		final boolean[] isFollow = new boolean[entries.length];
 		boolean any = false;
 		for (int i = 0; i < entries.length; i++)
