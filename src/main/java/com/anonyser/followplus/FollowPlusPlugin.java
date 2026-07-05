@@ -39,8 +39,6 @@ import net.runelite.client.game.ItemStats;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
 	name = "Follow Plus",
@@ -49,8 +47,6 @@ import org.slf4j.LoggerFactory;
 )
 public class FollowPlusPlugin extends Plugin
 {
-	private static final Logger log = LoggerFactory.getLogger(FollowPlusPlugin.class);
-
 	// The activity bar varbit runs 0..800 (verified against the Lucidare soul-wars hub plugin).
 	static final int MAX_ACTIVITY = 800;
 	// Top-level children of the Soul Wars game interface scanned for the match clock.
@@ -62,8 +58,6 @@ public class FollowPlusPlugin extends Plugin
 	// interaction; once following was seen, loss of interaction means it ended.
 	private static final int FOLLOW_GRACE_UNCONFIRMED = 10;
 	private static final int FOLLOW_GRACE_CONFIRMED = 3;
-	// Debug widget dumps are throttled to one every this many ticks (15s).
-	private static final int DEBUG_DUMP_INTERVAL_TICKS = 25;
 
 	@Inject
 	private Client client;
@@ -112,7 +106,6 @@ public class FollowPlusPlugin extends Plugin
 	private boolean inLobby;
 	private int waitingPlayers = -1;
 	private int lobbySecondsLeft = -1;
-	private int lastDebugDumpTick = -DEBUG_DUMP_INTERVAL_TICKS;
 
 	@Override
 	protected void startUp()
@@ -216,7 +209,6 @@ public class FollowPlusPlugin extends Plugin
 		final int[] order = FollowMenuSorter.followsToTop(isFollow);
 		if (order == null)
 		{
-			debug("menu: Follow already at the top, nothing to do");
 			return;
 		}
 		final MenuEntry[] sorted = new MenuEntry[entries.length];
@@ -225,10 +217,6 @@ public class FollowPlusPlugin extends Plugin
 			sorted[i] = entries[order[i]];
 		}
 		client.getMenu().setMenuEntries(sorted);
-		if (config.debugLogging())
-		{
-			log.info("[Follow Plus] menu reordered: [{}] -> [{}]", optionList(entries), optionList(sorted));
-		}
 	}
 
 	@Subscribe
@@ -243,13 +231,12 @@ public class FollowPlusPlugin extends Plugin
 				followTargetName = p.getName();
 				followConfirmed = false;
 				followMismatchTicks = 0;
-				debug("follow clicked: {}", followTargetName);
 			}
 			return;
 		}
 		if (followTargetName != null && cancelsFollow(action))
 		{
-			clearFollow("clicked " + event.getMenuOption());
+			clearFollow();
 		}
 	}
 
@@ -387,14 +374,12 @@ public class FollowPlusPlugin extends Plugin
 				gameTimer.reset();
 				lobbyTimer.reset();
 				activityValue = team != 0 ? client.getVarbitValue(VarbitID.SOUL_WARS_ACTIVITY_VALUE) : -1;
-				debug("soul wars team varbit now {} ({})", team, team == 0 ? "left game" : "in game");
 			}
 		}
 		else if (event.getVarbitId() == VarbitID.SOUL_WARS_ACTIVITY_VALUE)
 		{
 			activityValue = event.getValue();
 			activityEstimator.onValue(activityValue, client.getTickCount());
-			debug("activity varbit now {}", activityValue);
 		}
 	}
 
@@ -412,7 +397,7 @@ public class FollowPlusPlugin extends Plugin
 	{
 		if (followTargetName != null && followTargetName.equals(event.getPlayer().getName()))
 		{
-			clearFollow("target despawned");
+			clearFollow();
 		}
 	}
 
@@ -446,10 +431,6 @@ public class FollowPlusPlugin extends Plugin
 			&& followTargetName.equals(interacting.getName());
 		if (match)
 		{
-			if (!followConfirmed)
-			{
-				debug("following confirmed: {}", followTargetName);
-			}
 			followConfirmed = true;
 			followMismatchTicks = 0;
 			return;
@@ -458,16 +439,12 @@ public class FollowPlusPlugin extends Plugin
 		final int grace = followConfirmed ? FOLLOW_GRACE_CONFIRMED : FOLLOW_GRACE_UNCONFIRMED;
 		if (followMismatchTicks > grace)
 		{
-			clearFollow(followConfirmed ? "no longer interacting with target" : "follow never started");
+			clearFollow();
 		}
 	}
 
-	private void clearFollow(String reason)
+	private void clearFollow()
 	{
-		if (followTargetName != null)
-		{
-			debug("follow cleared ({}): {}", reason, followTargetName);
-		}
 		followTargetName = null;
 		followConfirmed = false;
 		followMismatchTicks = 0;
@@ -548,10 +525,6 @@ public class FollowPlusPlugin extends Plugin
 				total += stats.getEquipment().getPrayer();
 			}
 		}
-		if (prayerBonusKnown && total != prayerBonus)
-		{
-			debug("prayer bonus changed: {} -> {}", prayerBonus, total);
-		}
 		prayerBonus = total;
 		prayerBonusKnown = true;
 	}
@@ -569,7 +542,7 @@ public class FollowPlusPlugin extends Plugin
 			activitySecondsLeft = ticksToZero < 0 ? -1 : ticksToZero * 0.6;
 			if (config.showGameTimer())
 			{
-				scanGameTimerWidgets(tickCount);
+				scanGameTimerWidgets();
 				gameSecondsLeft = gameTimer.getSeconds(System.currentTimeMillis());
 			}
 			else
@@ -582,7 +555,7 @@ public class FollowPlusPlugin extends Plugin
 		gameSecondsLeft = -1;
 		if (config.showLobbyInfo())
 		{
-			scanLobbyWidgets(tickCount);
+			scanLobbyWidgets();
 		}
 		else
 		{
@@ -595,21 +568,14 @@ public class FollowPlusPlugin extends Plugin
 	/**
 	 * The exact child holding the Soul Wars match clock isn't verified anywhere, so every
 	 * time-looking text in the game interface is fed to GameTimerTracker, which only trusts a
-	 * widget once it has counted down like a real clock. With debug logging on, all non-empty
-	 * texts are dumped periodically so the right child can be pinned down from one live game.
+	 * widget once it has counted down like a real clock. Anything unproven stays "Unknown".
 	 */
-	private void scanGameTimerWidgets(int tickCount)
+	private void scanGameTimerWidgets()
 	{
 		final long now = System.currentTimeMillis();
-		final boolean dump = shouldDumpDebug(tickCount);
 		forEachWidgetText(InterfaceID.SOUL_WARS_GAME, (key, text) ->
 		{
 			final int seconds = SoulWarsTimeParser.parseTimeSeconds(text);
-			if (dump)
-			{
-				log.info("[Follow Plus] SW game widget {}: '{}'{}", key, text,
-					seconds >= 0 ? " (time " + seconds + "s" + (gameTimer.lockedKey() == key ? ", LOCKED" : "") + ")" : "");
-			}
 			if (seconds >= 0)
 			{
 				gameTimer.observe(key, seconds, now);
@@ -621,23 +587,16 @@ public class FollowPlusPlugin extends Plugin
 	 * Same discovery approach for the lobby board (interface 434): its layout isn't verified,
 	 * so any counting-down time becomes "next game" via its own lock-on tracker, and the
 	 * waiting count is taken from texts that mention players/waiting - one line per team is
-	 * the likely layout, so multiple matches are summed. Debug logging dumps everything.
+	 * the likely layout, so multiple matches are summed. Anything unread stays "Unknown".
 	 */
-	private void scanLobbyWidgets(int tickCount)
+	private void scanLobbyWidgets()
 	{
 		final long now = System.currentTimeMillis();
-		final boolean dump = shouldDumpDebug(tickCount);
 		final int[] waitingSum = {-1};
 		final int visible = forEachWidgetText(InterfaceID.SOUL_WARS_LOBBY, (key, text) ->
 		{
 			final int seconds = SoulWarsTimeParser.parseTimeSeconds(text);
 			final int count = SoulWarsLobbyParser.parsePlayerCount(text);
-			if (dump)
-			{
-				log.info("[Follow Plus] SW lobby widget {}: '{}'{}{}", key, text,
-					seconds >= 0 ? " (time " + seconds + "s" + (lobbyTimer.lockedKey() == key ? ", LOCKED" : "") + ")" : "",
-					count >= 0 ? " (players " + count + ")" : "");
-			}
 			if (seconds >= 0)
 			{
 				lobbyTimer.observe(key, seconds, now);
@@ -704,21 +663,11 @@ public class FollowPlusPlugin extends Plugin
 		}
 	}
 
-	private boolean shouldDumpDebug(int tickCount)
-	{
-		if (!config.debugLogging() || tickCount - lastDebugDumpTick < DEBUG_DUMP_INTERVAL_TICKS)
-		{
-			return false;
-		}
-		lastDebugDumpTick = tickCount;
-		return true;
-	}
-
 	// ----- shared helpers -----
 
 	private void resetAll()
 	{
-		clearFollow("reset");
+		clearFollow();
 		underAttack.reset();
 		activityEstimator.reset();
 		gameTimer.reset();
@@ -809,29 +758,6 @@ public class FollowPlusPlugin extends Plugin
 				return true;
 			default:
 				return false;
-		}
-	}
-
-	private static String optionList(MenuEntry[] entries)
-	{
-		final StringBuilder sb = new StringBuilder();
-		// print top of the menu first, i.e. the end of the array
-		for (int i = entries.length - 1; i >= 0; i--)
-		{
-			if (sb.length() > 0)
-			{
-				sb.append(", ");
-			}
-			sb.append(entries[i].getOption());
-		}
-		return sb.toString();
-	}
-
-	private void debug(String message, Object... args)
-	{
-		if (config.debugLogging())
-		{
-			log.info("[Follow Plus] " + message, args);
 		}
 	}
 

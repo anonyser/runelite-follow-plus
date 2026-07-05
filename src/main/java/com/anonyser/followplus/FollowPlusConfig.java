@@ -130,17 +130,4 @@ public interface FollowPlusConfig extends Config
 	{
 		return true;
 	}
-
-	@ConfigItem(
-		keyName = "debugLogging",
-		name = "Debug logging",
-		description = "Log menu reordering, follow changes and<br>"
-			+ "Soul Wars widget contents to the client<br>"
-			+ "log. For pinning down unknown widgets.",
-		position = 9
-	)
-	default boolean debugLogging()
-	{
-		return false;
-	}
 }
