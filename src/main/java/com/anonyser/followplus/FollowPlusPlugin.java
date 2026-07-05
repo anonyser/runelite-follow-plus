@@ -82,6 +82,7 @@ public class FollowPlusPlugin extends Plugin
 	private final UnderAttackTracker underAttack = new UnderAttackTracker(HIT_WINDOW_TICKS);
 	private final ActivityDecayEstimator activityEstimator = new ActivityDecayEstimator();
 	private final GameTimerTracker gameTimer = new GameTimerTracker();
+	private final GameTimerTracker lobbyTimer = new GameTimerTracker();
 
 	// Follow state
 	private String followTargetName;
@@ -98,6 +99,9 @@ public class FollowPlusPlugin extends Plugin
 	private int activityValue = -1;
 	private double activitySecondsLeft = -1;
 	private int gameSecondsLeft = -1;
+	private boolean inLobby;
+	private int waitingPlayers = -1;
+	private int lobbySecondsLeft = -1;
 	private int lastDebugDumpTick = -DEBUG_DUMP_INTERVAL_TICKS;
 
 	@Override
@@ -230,6 +234,7 @@ public class FollowPlusPlugin extends Plugin
 				soulWarsTeam = team;
 				activityEstimator.reset();
 				gameTimer.reset();
+				lobbyTimer.reset();
 				activityValue = team != 0 ? client.getVarbitValue(VarbitID.SOUL_WARS_ACTIVITY_VALUE) : -1;
 				debug("soul wars team varbit now {} ({})", team, team == 0 ? "left game" : "in game");
 			}
@@ -404,22 +409,35 @@ public class FollowPlusPlugin extends Plugin
 
 	private void updateSoulWars(int tickCount)
 	{
-		if (soulWarsTeam == 0)
+		if (soulWarsTeam != 0)
 		{
-			activitySecondsLeft = -1;
-			gameSecondsLeft = -1;
+			inLobby = false;
+			waitingPlayers = -1;
+			lobbySecondsLeft = -1;
+			final double ticksToZero = activityEstimator.ticksToZero(tickCount);
+			activitySecondsLeft = ticksToZero < 0 ? -1 : ticksToZero * 0.6;
+			if (config.showGameTimer())
+			{
+				scanGameTimerWidgets(tickCount);
+				gameSecondsLeft = gameTimer.getSeconds(System.currentTimeMillis());
+			}
+			else
+			{
+				gameSecondsLeft = -1;
+			}
 			return;
 		}
-		final double ticksToZero = activityEstimator.ticksToZero(tickCount);
-		activitySecondsLeft = ticksToZero < 0 ? -1 : ticksToZero * 0.6;
-		if (config.showGameTimer())
+		activitySecondsLeft = -1;
+		gameSecondsLeft = -1;
+		if (config.showLobbyInfo())
 		{
-			scanGameTimerWidgets(tickCount);
-			gameSecondsLeft = gameTimer.getSeconds(System.currentTimeMillis());
+			scanLobbyWidgets(tickCount);
 		}
 		else
 		{
-			gameSecondsLeft = -1;
+			inLobby = false;
+			waitingPlayers = -1;
+			lobbySecondsLeft = -1;
 		}
 	}
 
@@ -432,26 +450,86 @@ public class FollowPlusPlugin extends Plugin
 	private void scanGameTimerWidgets(int tickCount)
 	{
 		final long now = System.currentTimeMillis();
-		final boolean dump = config.debugLogging() && tickCount - lastDebugDumpTick >= DEBUG_DUMP_INTERVAL_TICKS;
-		if (dump)
+		final boolean dump = shouldDumpDebug(tickCount);
+		forEachWidgetText(InterfaceID.SOUL_WARS_GAME, (key, text) ->
 		{
-			lastDebugDumpTick = tickCount;
-		}
+			final int seconds = SoulWarsTimeParser.parseTimeSeconds(text);
+			if (dump)
+			{
+				log.info("[Follow Plus] SW game widget {}: '{}'{}", key, text,
+					seconds >= 0 ? " (time " + seconds + "s" + (gameTimer.lockedKey() == key ? ", LOCKED" : "") + ")" : "");
+			}
+			if (seconds >= 0)
+			{
+				gameTimer.observe(key, seconds, now);
+			}
+		});
+	}
+
+	/**
+	 * Same discovery approach for the lobby board (interface 434): its layout isn't verified,
+	 * so any counting-down time becomes "next game" via its own lock-on tracker, and the
+	 * waiting count is taken from texts that mention players/waiting - one line per team is
+	 * the likely layout, so multiple matches are summed. Debug logging dumps everything.
+	 */
+	private void scanLobbyWidgets(int tickCount)
+	{
+		final long now = System.currentTimeMillis();
+		final boolean dump = shouldDumpDebug(tickCount);
+		final int[] waitingSum = {-1};
+		final int visible = forEachWidgetText(InterfaceID.SOUL_WARS_LOBBY, (key, text) ->
+		{
+			final int seconds = SoulWarsTimeParser.parseTimeSeconds(text);
+			final int count = SoulWarsLobbyParser.parsePlayerCount(text);
+			if (dump)
+			{
+				log.info("[Follow Plus] SW lobby widget {}: '{}'{}{}", key, text,
+					seconds >= 0 ? " (time " + seconds + "s" + (lobbyTimer.lockedKey() == key ? ", LOCKED" : "") + ")" : "",
+					count >= 0 ? " (players " + count + ")" : "");
+			}
+			if (seconds >= 0)
+			{
+				lobbyTimer.observe(key, seconds, now);
+			}
+			if (count >= 0)
+			{
+				waitingSum[0] = waitingSum[0] < 0 ? count : waitingSum[0] + count;
+			}
+		});
+		inLobby = visible > 0;
+		waitingPlayers = waitingSum[0];
+		lobbySecondsLeft = lobbyTimer.getSeconds(now);
+	}
+
+	private interface TextVisitor
+	{
+		void visit(int key, String text);
+	}
+
+	/**
+	 * Walks every visible text in an interface, keyed stably enough to survive across ticks.
+	 * Returns the number of visible top-level children, i.e. 0 when the interface isn't open.
+	 */
+	private int forEachWidgetText(int groupId, TextVisitor visitor)
+	{
+		int visible = 0;
 		for (int child = 0; child < SW_WIDGET_SCAN_CHILDREN; child++)
 		{
-			final Widget w = client.getWidget(InterfaceID.SOUL_WARS_GAME, child);
-			if (w == null)
+			final Widget w = client.getWidget(groupId, child);
+			if (w == null || w.isHidden())
 			{
 				continue;
 			}
-			observeWidgetText(w, child * 1000, now, dump);
-			observeChildren(w.getStaticChildren(), child * 1000 + 100, now, dump);
-			observeChildren(w.getDynamicChildren(), child * 1000 + 400, now, dump);
-			observeChildren(w.getNestedChildren(), child * 1000 + 700, now, dump);
+			visible++;
+			visitText(w, child * 1000, visitor);
+			visitChildren(w.getStaticChildren(), child * 1000 + 100, visitor);
+			visitChildren(w.getDynamicChildren(), child * 1000 + 400, visitor);
+			visitChildren(w.getNestedChildren(), child * 1000 + 700, visitor);
 		}
+		return visible;
 	}
 
-	private void observeChildren(Widget[] children, int keyBase, long now, boolean dump)
+	private void visitChildren(Widget[] children, int keyBase, TextVisitor visitor)
 	{
 		if (children == null)
 		{
@@ -459,34 +537,30 @@ public class FollowPlusPlugin extends Plugin
 		}
 		for (int i = 0; i < children.length && i < 100; i++)
 		{
-			if (children[i] != null)
+			if (children[i] != null && !children[i].isHidden())
 			{
-				observeWidgetText(children[i], keyBase + i, now, dump);
+				visitText(children[i], keyBase + i, visitor);
 			}
 		}
 	}
 
-	private void observeWidgetText(Widget w, int key, long now, boolean dump)
+	private void visitText(Widget w, int key, TextVisitor visitor)
 	{
-		if (w.isHidden())
-		{
-			return;
-		}
 		final String text = w.getText();
-		if (text == null || text.isEmpty())
+		if (text != null && !text.isEmpty())
 		{
-			return;
+			visitor.visit(key, text);
 		}
-		final int seconds = SoulWarsTimeParser.parseTimeSeconds(text);
-		if (dump)
+	}
+
+	private boolean shouldDumpDebug(int tickCount)
+	{
+		if (!config.debugLogging() || tickCount - lastDebugDumpTick < DEBUG_DUMP_INTERVAL_TICKS)
 		{
-			log.info("[Follow Plus] SW widget {}: '{}'{}", key, text,
-				seconds >= 0 ? " (parsed " + seconds + "s" + (gameTimer.lockedKey() == key ? ", LOCKED" : "") + ")" : "");
+			return false;
 		}
-		if (seconds >= 0)
-		{
-			gameTimer.observe(key, seconds, now);
-		}
+		lastDebugDumpTick = tickCount;
+		return true;
 	}
 
 	// ----- shared helpers -----
@@ -497,6 +571,7 @@ public class FollowPlusPlugin extends Plugin
 		underAttack.reset();
 		activityEstimator.reset();
 		gameTimer.reset();
+		lobbyTimer.reset();
 		attackStatus = UnderAttackTracker.Status.NONE;
 		activePrayerNames.clear();
 		activeDrainEffect = 0;
@@ -505,6 +580,9 @@ public class FollowPlusPlugin extends Plugin
 		activityValue = -1;
 		activitySecondsLeft = -1;
 		gameSecondsLeft = -1;
+		inLobby = false;
+		waitingPlayers = -1;
+		lobbySecondsLeft = -1;
 	}
 
 	private boolean isFollowEntry(MenuEntry entry)
@@ -651,5 +729,20 @@ public class FollowPlusPlugin extends Plugin
 	int getGameSecondsLeft()
 	{
 		return gameSecondsLeft;
+	}
+
+	boolean isInSoulWarsLobby()
+	{
+		return inLobby;
+	}
+
+	int getWaitingPlayers()
+	{
+		return waitingPlayers;
+	}
+
+	int getLobbySecondsLeft()
+	{
+		return lobbySecondsLeft;
 	}
 }

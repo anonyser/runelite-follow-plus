@@ -76,10 +76,21 @@ public interface FollowPlusConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showLobbyInfo",
+		name = "Show Soul Wars lobby info",
+		description = "In the Soul Wars lobby, show how many players are waiting and the next game start time",
+		position = 6
+	)
+	default boolean showLobbyInfo()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "showHpWarning",
 		name = "Show hitpoints and combat warning",
 		description = "Show current hitpoints and a warning while you are being attacked",
-		position = 6
+		position = 7
 	)
 	default boolean showHpWarning()
 	{
@@ -90,7 +101,7 @@ public interface FollowPlusConfig extends Config
 		keyName = "debugLogging",
 		name = "Debug logging",
 		description = "Log menu reordering, follow changes and Soul Wars widget contents to the client log",
-		position = 7
+		position = 8
 	)
 	default boolean debugLogging()
 	{

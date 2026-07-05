@@ -48,6 +48,13 @@ class FollowPlusOverlay extends OverlayPanel
 		panelComponent.setPreferredSize(new Dimension(190, 0));
 		panelComponent.getChildren().add(TitleComponent.builder().text("Follow Plus").build());
 
+		// simple at-a-glance state: green = in a Soul Wars game, red = not
+		final boolean inGame = plugin.isInSoulWars();
+		panelComponent.getChildren().add(TitleComponent.builder()
+			.text(inGame ? "In game" : "Out of game")
+			.color(inGame ? GREEN : RED)
+			.build());
+
 		if (config.showFollowingStatus())
 		{
 			final String target = plugin.getFollowTargetName();
@@ -104,7 +111,15 @@ class FollowPlusOverlay extends OverlayPanel
 			}
 		}
 
-		if (plugin.isInSoulWars())
+		if (config.showLobbyInfo() && !inGame && plugin.isInSoulWarsLobby())
+		{
+			final int waiting = plugin.getWaitingPlayers();
+			addLine("Players waiting", waiting >= 0 ? String.valueOf(waiting) : "Unknown", null);
+			final int nextGame = plugin.getLobbySecondsLeft();
+			addLine("Next game in", nextGame >= 0 ? TimeFormat.mmss(nextGame) : "Unknown", null);
+		}
+
+		if (inGame)
 		{
 			if (config.showActivityTimer())
 			{
