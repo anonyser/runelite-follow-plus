@@ -23,10 +23,21 @@ public interface FollowPlusConfig extends Config
 	@ConfigItem(
 		keyName = "showOverlay",
 		name = "Show overlay",
-		description = "Show the Follow Plus status overlay on screen",
+		description = "Show the Follow Plus status overlay inside the game window",
 		position = 1
 	)
 	default boolean showOverlay()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "externalWindow",
+		name = "External window",
+		description = "Show a separate always-on-top window with the same status info, visible even when RuneLite is behind other windows (drag it to move, position is remembered)",
+		position = 2
+	)
+	default boolean externalWindow()
 	{
 		return true;
 	}

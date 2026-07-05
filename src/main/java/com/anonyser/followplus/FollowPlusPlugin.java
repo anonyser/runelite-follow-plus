@@ -1,10 +1,12 @@
 package com.anonyser.followplus;
 
 import com.google.inject.Provides;
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import javax.inject.Inject;
+import javax.swing.SwingUtilities;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -14,6 +16,7 @@ import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
+import net.runelite.api.Skill;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
@@ -30,6 +33,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStats;
 import net.runelite.client.plugins.Plugin;
@@ -79,6 +83,12 @@ public class FollowPlusPlugin extends Plugin
 	@Inject
 	private ItemManager itemManager;
 
+	@Inject
+	private ConfigManager configManager;
+
+	// created/disposed on the EDT, read on the game thread
+	private volatile FollowPlusWindow window;
+
 	private final UnderAttackTracker underAttack = new UnderAttackTracker(HIT_WINDOW_TICKS);
 	private final ActivityDecayEstimator activityEstimator = new ActivityDecayEstimator();
 	private final GameTimerTracker gameTimer = new GameTimerTracker();
@@ -108,6 +118,10 @@ public class FollowPlusPlugin extends Plugin
 	protected void startUp()
 	{
 		overlayManager.add(overlay);
+		if (config.externalWindow())
+		{
+			openWindow();
+		}
 		clientThread.invoke(() ->
 		{
 			if (client.getGameState() == GameState.LOGGED_IN)
@@ -126,7 +140,52 @@ public class FollowPlusPlugin extends Plugin
 	protected void shutDown()
 	{
 		overlayManager.remove(overlay);
+		closeWindow();
 		resetAll();
+	}
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!FollowPlusConfig.GROUP.equals(event.getGroup()))
+		{
+			return;
+		}
+		if ("externalWindow".equals(event.getKey()))
+		{
+			if (config.externalWindow())
+			{
+				openWindow();
+			}
+			else
+			{
+				closeWindow();
+			}
+		}
+	}
+
+	private void openWindow()
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			if (window == null)
+			{
+				window = new FollowPlusWindow(configManager);
+				window.setVisible(true);
+			}
+		});
+	}
+
+	private void closeWindow()
+	{
+		SwingUtilities.invokeLater(() ->
+		{
+			if (window != null)
+			{
+				window.dispose();
+				window = null;
+			}
+		});
 	}
 
 	@Provides
@@ -212,6 +271,98 @@ public class FollowPlusPlugin extends Plugin
 			updatePrayerBonus();
 		}
 		updateSoulWars(tickCount);
+		pushWindowSnapshot();
+	}
+
+	/**
+	 * Builds the external window's content on the game thread (client reads must happen
+	 * here), then hands the immutable snapshot to the EDT. The window never sees the client.
+	 */
+	private void pushWindowSnapshot()
+	{
+		final FollowPlusWindow w = window;
+		if (w == null)
+		{
+			return;
+		}
+		final boolean inGame = soulWarsTeam != 0;
+
+		String following = null;
+		Color followingColor = null;
+		if (config.showFollowingStatus())
+		{
+			if (followTargetName != null)
+			{
+				following = "Following: " + followTargetName;
+				followingColor = FollowPlusWindow.GREEN;
+			}
+			else
+			{
+				following = "Not following anyone";
+				followingColor = FollowPlusWindow.RED;
+			}
+		}
+
+		String hp = null;
+		String warning = null;
+		Color warningColor = null;
+		if (config.showHpWarning())
+		{
+			hp = "HP: " + client.getBoostedSkillLevel(Skill.HITPOINTS)
+				+ " / " + client.getRealSkillLevel(Skill.HITPOINTS);
+			if (attackStatus == UnderAttackTracker.Status.UNDER_ATTACK)
+			{
+				warning = "Currently being attacked";
+				warningColor = FollowPlusWindow.RED;
+			}
+			else if (attackStatus == UnderAttackTracker.Status.POSSIBLE)
+			{
+				warning = "Possibly being attacked";
+				warningColor = FollowPlusWindow.AMBER;
+			}
+		}
+
+		String prayer = null;
+		String prayers = null;
+		if (config.showPrayerTimer())
+		{
+			final int points = client.getBoostedSkillLevel(Skill.PRAYER);
+			prayer = "Prayer: " + points + " / " + client.getRealSkillLevel(Skill.PRAYER);
+			final double seconds = PrayerDrainCalculator.secondsRemaining(points, activeDrainEffect, prayerBonus);
+			if (seconds >= 0)
+			{
+				prayer += " (~" + TimeFormat.mmss(seconds) + ")";
+			}
+			if (!activePrayerNames.isEmpty())
+			{
+				prayers = String.join(", ", activePrayerNames);
+			}
+		}
+
+		String swLine1 = null;
+		String swLine2 = null;
+		if (inGame)
+		{
+			if (config.showActivityTimer())
+			{
+				swLine1 = "Activity: " + (activityValue >= 0
+					? Math.round(activityValue * 100f / MAX_ACTIVITY) + "%" : "Unknown")
+					+ (activitySecondsLeft >= 0 ? " (~" + TimeFormat.mmss(activitySecondsLeft) + ")" : "");
+			}
+			if (config.showGameTimer())
+			{
+				swLine2 = "Game: " + (gameSecondsLeft >= 0 ? TimeFormat.mmss(gameSecondsLeft) : "Unknown");
+			}
+		}
+		else if (inLobby && config.showLobbyInfo())
+		{
+			swLine1 = "Players waiting: " + (waitingPlayers >= 0 ? String.valueOf(waitingPlayers) : "Unknown");
+			swLine2 = "Next game: " + (lobbySecondsLeft >= 0 ? TimeFormat.mmss(lobbySecondsLeft) : "Unknown");
+		}
+
+		final FollowPlusWindow.Snapshot snap = new FollowPlusWindow.Snapshot(
+			inGame, following, followingColor, hp, warning, warningColor, prayer, prayers, swLine1, swLine2);
+		SwingUtilities.invokeLater(() -> w.update(snap));
 	}
 
 	@Subscribe
