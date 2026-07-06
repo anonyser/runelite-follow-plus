@@ -1,24 +1,30 @@
 # Soul Wars Status
 
-Small status overlay for Soul Wars taxiing and anywhere else you spend your time following people
-around.
+A companion overlay for Soul Wars, whether you're taxiing or just playing games.
 
-What it shows:
+It shows a status window, either as an in-client overlay or a separate always-on-top window that
+stays visible when RuneLite is minimised (handy for watching an alt):
 
-- **Status window** - who you're following, your HP (plus a warning when you're being attacked),
-  your active prayers with how long your prayer will last, and inside Soul Wars the activity bar
-  with how long until it empties, the match time left, and in the lobby the number of players
-  waiting and time to the next game. A green "In game" / red "Out of game" line sits at the top. It
-  can show as an in-client overlay or as a separate always-on-top window that stays visible when
-  RuneLite is minimised (handy for watching an alt). The external window is on by default.
+- who you're following, and whether they're moving
+- your HP, plus a line for when you're fighting the Avatar with its health
+- your active prayers and how long your prayer will last, coloured by how much is left
+- your team colour, blue or red
+- zeal: tokens, session, last game, lifetime, and per hour
+- run energy
+- while in a game: your captures, avatar damage, avatar kills, fragments sacrificed, the activity
+  bar, and the match time left
+- in the lobby: players waiting and time to the next game
 
-Following status is read-only: it notices when you follow another player and shows their name. The
-plugin does not change or reorder any menu options. There is no sidebar panel; everything is in the
-normal plugin settings. Values that can't be read safely show "Unknown" rather than a guess.
+Low activity, low prayer, and the last five minutes of a game flash so they catch your eye. Every
+line can be turned off in the settings.
 
-The prayer time uses the same drain math as RuneLite's built-in prayer plugin (drain effect of each
-active prayer vs 2x your equipment prayer bonus + 60), with the prayer bonus read from your worn
-gear.
+The side panel has a zeal calculator (work out the zeal for a target level or XP on any of the seven
+trainable skills, filled in from your own levels), how many Spoils of War crates your tokens buy, and
+a daily zeal-xp tracker against the 1,000,000 cap.
+
+The plugin is display-only. It reads your following status (it doesn't change or reorder any menu
+options) and the match stats the game already shows, and it never automates anything. Values it
+can't read safely show "Unknown" rather than a guess.
 
 ## Building
 

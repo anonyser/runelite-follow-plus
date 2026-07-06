@@ -5,34 +5,25 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.util.List;
 import javax.inject.Inject;
-import net.runelite.api.Client;
-import net.runelite.api.Skill;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
 
 /**
- * The always-visible utility window: follow status, HP + combat warning, prayers + depletion
- * estimate, and the Soul Wars timers while inside a game. Movable like any RuneLite overlay.
+ * The in-game overlay. It only renders the status model the plugin builds on the game tick, so it
+ * touches no client state itself.
  */
 class FollowPlusOverlay extends OverlayPanel
 {
-	private static final Color RED = new Color(216, 60, 62);
-	private static final Color GREEN = new Color(0, 200, 83);
-	private static final Color AMBER = new Color(255, 200, 60);
-	private static final int MAX_PRAYER_LINES = 4;
-
 	private final FollowPlusPlugin plugin;
 	private final FollowPlusConfig config;
-	private final Client client;
 
 	@Inject
-	FollowPlusOverlay(FollowPlusPlugin plugin, FollowPlusConfig config, Client client)
+	FollowPlusOverlay(FollowPlusPlugin plugin, FollowPlusConfig config)
 	{
 		this.plugin = plugin;
 		this.config = config;
-		this.client = client;
 		setPosition(OverlayPosition.TOP_LEFT);
 	}
 
@@ -43,121 +34,49 @@ class FollowPlusOverlay extends OverlayPanel
 		{
 			return null;
 		}
+		final List<StatusLine> model = plugin.getStatusModel();
+		if (model.isEmpty())
+		{
+			return null;
+		}
 
 		panelComponent.getChildren().clear();
 		panelComponent.setPreferredSize(new Dimension(190, 0));
 		panelComponent.getChildren().add(TitleComponent.builder().text("Soul Wars Status").build());
 
-		// simple at-a-glance state: green = in a Soul Wars game, red = not
-		final boolean inGame = plugin.isInSoulWars();
-		panelComponent.getChildren().add(TitleComponent.builder()
-			.text(inGame ? "In game" : "Out of game")
-			.color(inGame ? GREEN : RED)
-			.build());
-
-		if (config.showFollowingStatus())
+		final long now = System.currentTimeMillis();
+		for (StatusLine line : model)
 		{
-			final String target = plugin.getFollowTargetName();
-			if (target != null)
+			final Color color = line.flash ? StatusLine.flashColor(now) : line.color;
+			if (line.header)
 			{
-				addLine("Following", target, GREEN);
+				final TitleComponent.TitleComponentBuilder b = TitleComponent.builder().text(line.left);
+				if (color != null)
+				{
+					b.color(color);
+				}
+				panelComponent.getChildren().add(b.build());
+			}
+			else if (line.right != null)
+			{
+				final LineComponent.LineComponentBuilder b = LineComponent.builder().left(line.left).right(line.right);
+				if (color != null)
+				{
+					b.rightColor(color);
+				}
+				panelComponent.getChildren().add(b.build());
 			}
 			else
 			{
-				addLeftLine("Not following anyone", RED);
-			}
-		}
-
-		if (config.showHpWarning())
-		{
-			addLine("HP", client.getBoostedSkillLevel(Skill.HITPOINTS)
-				+ " / " + client.getRealSkillLevel(Skill.HITPOINTS), null);
-			switch (plugin.getAttackStatus())
-			{
-				case UNDER_ATTACK:
-					addLeftLine("Currently being attacked", RED);
-					break;
-				case POSSIBLE:
-					addLeftLine("Possibly being attacked", AMBER);
-					break;
-				default:
-					break;
-			}
-		}
-
-		if (config.showPrayerTimer())
-		{
-			final int points = client.getBoostedSkillLevel(Skill.PRAYER);
-			addLine("Prayer", points + " / " + client.getRealSkillLevel(Skill.PRAYER), null);
-			final List<String> prayers = plugin.getActivePrayerNames();
-			if (prayers.isEmpty())
-			{
-				addLine("Active", "none", null);
-			}
-			else
-			{
-				for (int i = 0; i < prayers.size() && i < MAX_PRAYER_LINES; i++)
+				final LineComponent.LineComponentBuilder b = LineComponent.builder().left(line.left);
+				if (color != null)
 				{
-					addLeftLine("· " + prayers.get(i), null);
+					b.leftColor(color);
 				}
-				if (prayers.size() > MAX_PRAYER_LINES)
-				{
-					addLeftLine("· +" + (prayers.size() - MAX_PRAYER_LINES) + " more", null);
-				}
-				final double seconds = PrayerDrainCalculator.secondsRemaining(
-					points, plugin.getActiveDrainEffect(), plugin.getPrayerBonus());
-				addLine("Depletes in", seconds < 0 ? "—" : "~" + TimeFormat.mmss(seconds),
-					seconds >= 0 && seconds < 30 ? RED : null);
-			}
-		}
-
-		if (config.showLobbyInfo() && !inGame && plugin.isInSoulWarsLobby())
-		{
-			final String waiting = plugin.getPlayersWaitingText();
-			addLine("Players waiting", waiting != null ? waiting : "Unknown", null);
-			final String nextGame = plugin.getNextGameText();
-			addLine("Next game", nextGame != null ? nextGame : "Unknown", null);
-		}
-
-		if (inGame)
-		{
-			if (config.showActivityTimer())
-			{
-				final int value = plugin.getActivityValue();
-				addLine("Activity", value >= 0
-					? Math.round(value * 100f / FollowPlusPlugin.MAX_ACTIVITY) + "%"
-					: "Unknown", null);
-				final double left = plugin.getActivitySecondsLeft();
-				addLine("Inactive in", left >= 0 ? "~" + TimeFormat.mmss(left) : "Unknown",
-					left >= 0 && left < 30 ? RED : null);
-			}
-			if (config.showGameTimer())
-			{
-				final int seconds = plugin.getGameSecondsLeft();
-				addLine("Game time left", seconds >= 0 ? TimeFormat.mmss(seconds) : "Unknown", null);
+				panelComponent.getChildren().add(b.build());
 			}
 		}
 
 		return super.render(graphics);
-	}
-
-	private void addLine(String left, String right, Color rightColor)
-	{
-		final LineComponent.LineComponentBuilder builder = LineComponent.builder().left(left).right(right);
-		if (rightColor != null)
-		{
-			builder.rightColor(rightColor);
-		}
-		panelComponent.getChildren().add(builder.build());
-	}
-
-	private void addLeftLine(String left, Color leftColor)
-	{
-		final LineComponent.LineComponentBuilder builder = LineComponent.builder().left(left);
-		if (leftColor != null)
-		{
-			builder.leftColor(leftColor);
-		}
-		panelComponent.getChildren().add(builder.build());
 	}
 }

@@ -9,26 +9,26 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
 import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.Timer;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.ui.FontManager;
 
 /**
- * The external always-on-top window (AFK Overlay style): stays visible while the RuneLite
- * client is buried behind other windows, which is the whole point for people running alts.
- * Undecorated, drag anywhere to move, position saved to config. All updates arrive as
- * prebuilt Snapshots on the EDT - this class never touches the client API.
+ * The external always-on-top window (AFK Overlay style): stays visible while the RuneLite client
+ * is buried behind other windows, which is the whole point for people running alts. Undecorated,
+ * drag anywhere to move, position saved to config. It renders the {@link StatusLine} model the
+ * plugin builds; a label per line, updated in place so the text never jitters, re-packing only
+ * when the number of lines changes. This class never touches the client API.
  */
 class FollowPlusWindow extends JFrame
 {
-	static final Color RED = new Color(216, 60, 62);
-	static final Color GREEN = new Color(0, 200, 83);
-	static final Color AMBER = new Color(255, 200, 60);
 	private static final Color BG = new Color(24, 24, 24);
 	private static final Color BORDER = new Color(70, 70, 70);
 	private static final Color FG = new Color(220, 220, 220);
@@ -38,51 +38,15 @@ class FollowPlusWindow extends JFrame
 	private static final String KEY_X = "windowX";
 	private static final String KEY_Y = "windowY";
 
-	/** Immutable view of everything the window shows; null/empty text hides a line. */
-	static final class Snapshot
-	{
-		final boolean inGame;
-		final String following;
-		final Color followingColor;
-		final String hp;
-		final String warning;
-		final Color warningColor;
-		final String prayer;
-		final List<String> prayerNames;
-		final String swLine1;
-		final String swLine2;
-
-		Snapshot(boolean inGame, String following, Color followingColor, String hp,
-			String warning, Color warningColor, String prayer, List<String> prayerNames,
-			String swLine1, String swLine2)
-		{
-			this.inGame = inGame;
-			this.following = following;
-			this.followingColor = followingColor;
-			this.hp = hp;
-			this.warning = warning;
-			this.warningColor = warningColor;
-			this.prayer = prayer;
-			this.prayerNames = prayerNames;
-			this.swLine1 = swLine1;
-			this.swLine2 = swLine2;
-		}
-	}
-
 	private final ConfigManager configManager;
-
-	private final JLabel statusLabel = makeLabel("—", FG);
-	private final JLabel followingLabel = makeLabel("", FG);
-	private final JLabel hpLabel = makeLabel("", FG);
-	private final JLabel warningLabel = makeLabel("", RED);
-	private final JLabel prayerLabel = makeLabel("", FG);
-	private final JLabel prayersLabel = makeLabel("", MUTED);
-	private final JLabel swLabel1 = makeLabel("", FG);
-	private final JLabel swLabel2 = makeLabel("", FG);
+	private final JPanel content;
+	private final Font normalFont;
+	private final Font boldFont;
+	private final List<JLabel> labels = new ArrayList<>();
+	private final Timer flashTimer = new Timer(300, e -> applyFlash());
+	private List<StatusLine> model;
 
 	private Point dragPoint;
-	private boolean structureChanged;
-	private List<String> lastPrayers;
 
 	FollowPlusWindow(ConfigManager configManager)
 	{
@@ -96,7 +60,7 @@ class FollowPlusWindow extends JFrame
 		setFocusableWindowState(false);
 		setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
-		final JPanel content = new JPanel()
+		content = new JPanel()
 		{
 			@Override
 			public Dimension getPreferredSize()
@@ -111,27 +75,12 @@ class FollowPlusWindow extends JFrame
 			BorderFactory.createLineBorder(BORDER),
 			BorderFactory.createEmptyBorder(6, 10, 8, 10)));
 
+		normalFont = FontManager.getRunescapeFont();
+		boldFont = normalFont.deriveFont(Font.BOLD);
+
 		final JLabel title = makeLabel("Soul Wars Status", MUTED);
 		content.add(title);
-		statusLabel.setFont(statusLabel.getFont().deriveFont(Font.BOLD));
-		content.add(statusLabel);
-		content.add(followingLabel);
-		content.add(hpLabel);
-		content.add(warningLabel);
-		content.add(prayerLabel);
-		content.add(prayersLabel);
-		content.add(swLabel1);
-		content.add(swLabel2);
 		setContentPane(content);
-
-		// only the title and status show until the first snapshot arrives
-		followingLabel.setVisible(false);
-		hpLabel.setVisible(false);
-		warningLabel.setVisible(false);
-		prayerLabel.setVisible(false);
-		prayersLabel.setVisible(false);
-		swLabel1.setVisible(false);
-		swLabel2.setVisible(false);
 
 		// drag anywhere to move; the labels have no listeners so events fall through to us
 		final MouseAdapter dragger = new MouseAdapter()
@@ -164,75 +113,77 @@ class FollowPlusWindow extends JFrame
 
 		pack();
 		loadPosition();
+		flashTimer.start();
+	}
+
+	@Override
+	public void dispose()
+	{
+		flashTimer.stop();
+		super.dispose();
 	}
 
 	/** EDT only. */
-	void update(Snapshot s)
+	void update(List<StatusLine> model)
 	{
-		statusLabel.setText(s.inGame ? "IN GAME" : "OUT OF GAME");
-		statusLabel.setForeground(s.inGame ? GREEN : RED);
-		setLine(followingLabel, s.following, s.followingColor);
-		setLine(hpLabel, s.hp, FG);
-		setLine(warningLabel, s.warning, s.warningColor);
-		setLine(prayerLabel, s.prayer, FG);
-		setPrayers(s.prayerNames);
-		setLine(swLabel1, s.swLine1, FG);
-		setLine(swLabel2, s.swLine2, FG);
+		this.model = model;
+		boolean structureChanged = false;
+		if (labels.size() != model.size())
+		{
+			rebuild(model.size());
+			structureChanged = true;
+		}
+		for (int i = 0; i < model.size(); i++)
+		{
+			applyLine(labels.get(i), model.get(i));
+		}
 		if (structureChanged)
 		{
-			structureChanged = false;
 			pack();
 		}
 	}
 
-	private void setLine(JLabel label, String text, Color color)
+	/** Re-tints flashing lines each timer tick so they pulse between updates. */
+	private void applyFlash()
 	{
-		final boolean visible = text != null && !text.isEmpty();
-		if (label.isVisible() != visible)
+		final List<StatusLine> m = model;
+		if (m == null)
 		{
-			label.setVisible(visible);
-			structureChanged = true;
+			return;
 		}
-		if (visible)
+		final Color c = StatusLine.flashColor(System.currentTimeMillis());
+		for (int i = 0; i < m.size() && i < labels.size(); i++)
 		{
-			label.setText(text);
-			if (color != null)
+			if (m.get(i).flash)
 			{
-				label.setForeground(color);
+				labels.get(i).setForeground(c);
 			}
 		}
 	}
 
-	/**
-	 * Active prayers, one bullet per line like the in-client overlay. A single fixed-width label
-	 * would truncate a long list, so each prayer gets its own line via an HTML label and the
-	 * window re-packs to grow when the number of lines changes.
-	 */
-	private void setPrayers(List<String> names)
+	private void rebuild(int count)
 	{
-		final boolean visible = names != null && !names.isEmpty();
-		if (prayersLabel.isVisible() != visible)
+		for (JLabel label : labels)
 		{
-			prayersLabel.setVisible(visible);
-			structureChanged = true;
+			content.remove(label);
 		}
-		if (visible && !names.equals(lastPrayers))
+		labels.clear();
+		for (int i = 0; i < count; i++)
 		{
-			final StringBuilder sb = new StringBuilder("<html>");
-			for (int i = 0; i < names.size(); i++)
-			{
-				if (i > 0)
-				{
-					sb.append("<br>");
-				}
-				sb.append("· ").append(names.get(i));
-			}
-			sb.append("</html>");
-			prayersLabel.setText(sb.toString());
-			// the line count may have changed, so the window must re-pack to fit
-			structureChanged = true;
+			final JLabel label = makeLabel("", FG);
+			content.add(label);
+			labels.add(label);
 		}
-		lastPrayers = names;
+		content.revalidate();
+	}
+
+	private void applyLine(JLabel label, StatusLine line)
+	{
+		label.setText(line.right != null ? line.left + ":  " + line.right : line.left);
+		label.setForeground(line.flash
+			? StatusLine.flashColor(System.currentTimeMillis())
+			: (line.color != null ? line.color : FG));
+		label.setFont(line.header ? boldFont : normalFont);
 	}
 
 	private static JLabel makeLabel(String text, Color color)
