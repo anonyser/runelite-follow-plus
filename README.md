@@ -3,7 +3,8 @@
 A companion overlay for Soul Wars, whether you're taxiing or just playing games.
 
 It shows a status window, either as an in-client overlay or a separate always-on-top window that
-stays visible when RuneLite is minimised (handy for watching an alt):
+stays visible when RuneLite is minimised (handy for watching an alt, and you can click it to bring
+the game back to the front):
 
 - who you're following, and whether they're moving
 - your HP, plus a line for when you're fighting the Avatar with its health
@@ -11,8 +12,9 @@ stays visible when RuneLite is minimised (handy for watching an alt):
 - your team colour, blue or red
 - zeal: tokens, session, last game, lifetime, and per hour
 - run energy
+- your session win/loss record, with a red/blue team breakdown
 - while in a game: your captures, avatar damage, avatar kills, fragments sacrificed, the activity
-  bar, and the match time left
+  bar (green, then red as it drops), and the match time left
 - in the lobby: players waiting and time to the next game
 
 Low activity, low prayer, and the last five minutes of a game flash so they catch your eye. Every

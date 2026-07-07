@@ -37,8 +37,11 @@ class FollowPlusWindow extends JFrame
 
 	private static final String KEY_X = "windowX";
 	private static final String KEY_Y = "windowY";
+	// Movement under this many pixels between press and release counts as a click, not a drag.
+	private static final int CLICK_SLOP_PX = 4;
 
 	private final ConfigManager configManager;
+	private final Runnable onClick;
 	private final JPanel content;
 	private final Font normalFont;
 	private final Font boldFont;
@@ -47,10 +50,12 @@ class FollowPlusWindow extends JFrame
 	private List<StatusLine> model;
 
 	private Point dragPoint;
+	private Point pressScreen;
 
-	FollowPlusWindow(ConfigManager configManager)
+	FollowPlusWindow(ConfigManager configManager, Runnable onClick)
 	{
 		this.configManager = configManager;
+		this.onClick = onClick;
 
 		setTitle("Soul Wars Status");
 		setUndecorated(true);
@@ -82,13 +87,15 @@ class FollowPlusWindow extends JFrame
 		content.add(title);
 		setContentPane(content);
 
-		// drag anywhere to move; the labels have no listeners so events fall through to us
+		// drag anywhere to move; a click (no real drag) raises the RuneLite client. The labels have
+		// no listeners so events fall through to us.
 		final MouseAdapter dragger = new MouseAdapter()
 		{
 			@Override
 			public void mousePressed(MouseEvent e)
 			{
 				dragPoint = e.getPoint();
+				pressScreen = e.getLocationOnScreen();
 			}
 
 			@Override
@@ -104,8 +111,21 @@ class FollowPlusWindow extends JFrame
 			@Override
 			public void mouseReleased(MouseEvent e)
 			{
+				final boolean click = pressScreen != null
+					&& e.getLocationOnScreen().distance(pressScreen) <= CLICK_SLOP_PX;
 				dragPoint = null;
-				savePosition();
+				pressScreen = null;
+				if (click)
+				{
+					if (onClick != null)
+					{
+						onClick.run();
+					}
+				}
+				else
+				{
+					savePosition();
+				}
 			}
 		};
 		addMouseListener(dragger);

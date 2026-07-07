@@ -11,6 +11,7 @@ import java.util.List;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.Actor;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.Hitsplat;
@@ -38,6 +39,10 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.WorldView;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.chat.ChatColorType;
+import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -46,6 +51,7 @@ import net.runelite.client.game.ItemStats;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.ClientUI;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 
@@ -73,6 +79,10 @@ public class FollowPlusPlugin extends Plugin
 	private static final int SOUL_FRAGMENT_ID = 25201;
 	// Nomad's reward shop interface; XP gained while it's open is a Zeal purchase, not combat.
 	private static final int REWARD_SHOP_GROUP = 442;
+
+	// One-time in-game note after an update ships - keep in step with the build.gradle version.
+	private static final String PLUGIN_VERSION = "1.2.0";
+	private static final String K_ANNOUNCED = "announcedVersion";
 
 	static final Color GREEN = new Color(0, 200, 83);
 	static final Color RED = new Color(216, 60, 62);
@@ -103,6 +113,12 @@ public class FollowPlusPlugin extends Plugin
 	@Inject
 	private ClientToolbar clientToolbar;
 
+	@Inject
+	private ChatMessageManager chatMessageManager;
+
+	@Inject
+	private ClientUI clientUI;
+
 	// created/disposed on the EDT, read on the game thread
 	private volatile FollowPlusWindow window;
 	private SoulWarsPanel panel;
@@ -112,11 +128,15 @@ public class FollowPlusPlugin extends Plugin
 		Skill.RANGED, Skill.MAGIC, Skill.PRAYER));
 	private boolean dailyRestored;
 	private boolean rewardShopOpen;
+	// One-time post-update in-game note: armed on login, sent a few ticks later so it isn't lost.
+	private boolean pendingUpdateNote;
+	private int ticksSinceLogin;
 
 	private final ActivityDecayEstimator activityEstimator = new ActivityDecayEstimator();
 	private final GameTimerTracker gameTimer = new GameTimerTracker();
 	private final ZealTracker zeal = new ZealTracker();
 	private final SoulWarsMatchTracker match = new SoulWarsMatchTracker();
+	private final SessionResultTracker results = new SessionResultTracker();
 
 	// Follow state
 	private String followTargetName;
@@ -141,6 +161,10 @@ public class FollowPlusPlugin extends Plugin
 	private int runEnergyPct;
 	private int blueKills = -1;
 	private int redKills = -1;
+	// Last avatar-kill counts seen while a game was live; used to decide the result when the game
+	// ends, because the HUD is often gone by the time the team varbit clears.
+	private int lastBlueKills = -1;
+	private int lastRedKills = -1;
 	private int blueHealth = -1;
 	private int redHealth = -1;
 	private int blueStrength = -1;
@@ -152,6 +176,7 @@ public class FollowPlusPlugin extends Plugin
 	protected void startUp()
 	{
 		zeal.startSession(System.currentTimeMillis());
+		results.reset();
 		overlayManager.add(overlay);
 		panel = new SoulWarsPanel();
 		navButton = NavigationButton.builder()
@@ -218,7 +243,9 @@ public class FollowPlusPlugin extends Plugin
 		{
 			if (window == null)
 			{
-				window = new FollowPlusWindow(configManager);
+				// Clicking the always-on-top window raises the RuneLite client (handy for alts):
+				// the window stays API-free and just runs this callback.
+				window = new FollowPlusWindow(configManager, clientUI::forceFocus);
 				window.setVisible(true);
 			}
 		});
@@ -272,6 +299,13 @@ public class FollowPlusPlugin extends Plugin
 			return;
 		}
 		final int tickCount = client.getTickCount();
+
+		ticksSinceLogin++;
+		if (pendingUpdateNote && ticksSinceLogin >= 4)
+		{
+			pendingUpdateNote = false;
+			announceUpdate();
+		}
 
 		team = SoulWarsTeam.fromVarbit(soulWarsTeam);
 		updateFollow(local);
@@ -373,6 +407,12 @@ public class FollowPlusPlugin extends Plugin
 			if (value != soulWarsTeam)
 			{
 				final boolean entering = soulWarsTeam == 0 && value != 0;
+				final boolean leaving = soulWarsTeam != 0 && value == 0;
+				if (leaving)
+				{
+					// team still holds the team we just played; decide before it resets below
+					recordGameResult(team);
+				}
 				soulWarsTeam = value;
 				team = SoulWarsTeam.fromVarbit(value);
 				activityEstimator.reset();
@@ -381,6 +421,8 @@ public class FollowPlusPlugin extends Plugin
 				if (entering)
 				{
 					match.reset();
+					lastBlueKills = -1;
+					lastRedKills = -1;
 				}
 			}
 		}
@@ -425,6 +467,9 @@ public class FollowPlusPlugin extends Plugin
 				break;
 			case LOGGED_IN:
 				prayerBonusKnown = false;
+				ticksSinceLogin = 0;
+				pendingUpdateNote = !PLUGIN_VERSION.equals(
+					configManager.getConfiguration(FollowPlusConfig.GROUP, K_ANNOUNCED));
 				break;
 			default:
 				break;
@@ -646,6 +691,12 @@ public class FollowPlusPlugin extends Plugin
 			redHealth = SoulWarsHud.parsePercent(hudText(SoulWarsHud.RED_HEALTH));
 			blueStrength = SoulWarsHud.parsePercent(hudText(SoulWarsHud.BLUE_STRENGTH));
 			redStrength = SoulWarsHud.parsePercent(hudText(SoulWarsHud.RED_STRENGTH));
+			// keep the last valid kill counts so the result can be decided once the game ends
+			if (blueKills >= 0 && redKills >= 0)
+			{
+				lastBlueKills = blueKills;
+				lastRedKills = redKills;
+			}
 		}
 		else
 		{
@@ -681,6 +732,39 @@ public class FollowPlusPlugin extends Plugin
 			}
 		}
 		return count;
+	}
+
+	/**
+	 * A Soul Wars game just ended (the team varbit cleared). Decides win/loss/draw from the last
+	 * avatar-kill counts read from the HUD and tallies it against the team you played. The kill
+	 * snapshot is used rather than a live read because the HUD is usually gone by now.
+	 */
+	private void recordGameResult(SoulWarsTeam endedTeam)
+	{
+		final SessionResultTracker.Outcome outcome =
+			SessionResultTracker.decide(lastBlueKills, lastRedKills, endedTeam);
+		results.record(endedTeam, outcome);
+	}
+
+	/**
+	 * One in-game chat note per shipped version (the way many plugins flag updates), sent a few
+	 * ticks after login so it isn't lost in the login burst, then never again for this version
+	 * (remembered in a global config key).
+	 */
+	private void announceUpdate()
+	{
+		final String message = new ChatMessageBuilder()
+			.append(ChatColorType.HIGHLIGHT)
+			.append("Soul Wars Status " + PLUGIN_VERSION + ": ")
+			.append(ChatColorType.NORMAL)
+			.append("now tracks your session win/loss record and a team breakdown "
+				+ "(red wins/losses, blue wins/losses). Both are toggleable in the plugin settings.")
+			.build();
+		chatMessageManager.queue(QueuedMessage.builder()
+			.type(ChatMessageType.GAMEMESSAGE)
+			.runeLiteFormattedMessage(message)
+			.build());
+		configManager.setConfiguration(FollowPlusConfig.GROUP, K_ANNOUNCED, PLUGIN_VERSION);
 	}
 
 	private void updateSoulWars(int tickCount)
@@ -878,6 +962,7 @@ public class FollowPlusPlugin extends Plugin
 		}
 
 		addZealLines(lines);
+		addSessionRecordLines(lines);
 
 		if (inGame)
 		{
@@ -926,6 +1011,27 @@ public class FollowPlusPlugin extends Plugin
 		}
 	}
 
+	private void addSessionRecordLines(List<StatusLine> lines)
+	{
+		if (config.showSessionRecord())
+		{
+			String record = results.wins() + "W / " + results.losses() + "L";
+			if (results.draws() > 0)
+			{
+				record += " / " + results.draws() + "D";
+			}
+			lines.add(StatusLine.of("Session W/L", record, null));
+		}
+		if (config.showTeamComposition())
+		{
+			// The RW/RL/BW/BL value is too wide to sit beside a "Team composition" label without
+			// being clipped by the overlay/window width, so give it its own line underneath.
+			lines.add(StatusLine.plain("Team composition", null));
+			lines.add(StatusLine.plain("RW" + results.redWins() + "/RL" + results.redLosses()
+				+ "/BW" + results.blueWins() + "/BL" + results.blueLosses(), null));
+		}
+	}
+
 	private void addMatchLines(List<StatusLine> lines)
 	{
 		if (config.showAvatarKills() && blueKills >= 0 && redKills >= 0)
@@ -959,13 +1065,18 @@ public class FollowPlusPlugin extends Plugin
 		if (config.showActivityTimer())
 		{
 			final int actPct = activityValue >= 0 ? Math.round(activityValue * 100f / MAX_ACTIVITY) : -1;
-			lines.add(actPct >= 0 && actPct < 35
+			// Activity and the "Inactive in" countdown share one colour band so they read together:
+			// >=50% green, 35-49% steady red, <35% flashing red.
+			final boolean flashActivity = actPct >= 0 && actPct < 35;
+			final Color actColor = actPct < 0 ? null : (actPct >= 50 ? GREEN : RED);
+			lines.add(flashActivity
 				? StatusLine.alert("Activity", actPct + "%", RED)
-				: StatusLine.of("Activity", actPct >= 0 ? actPct + "%" : "Unknown", null));
+				: StatusLine.of("Activity", actPct >= 0 ? actPct + "%" : "Unknown", actColor));
 			if (activitySecondsLeft >= 0)
 			{
-				lines.add(StatusLine.of("Inactive in", "~" + TimeFormat.mmss(activitySecondsLeft),
-					activitySecondsLeft < 30 ? RED : null));
+				lines.add(flashActivity
+					? StatusLine.alert("Inactive in", "~" + TimeFormat.mmss(activitySecondsLeft), RED)
+					: StatusLine.of("Inactive in", "~" + TimeFormat.mmss(activitySecondsLeft), actColor));
 			}
 		}
 		if (config.showGameTimer())
@@ -1001,6 +1112,8 @@ public class FollowPlusPlugin extends Plugin
 		playersWaitingText = null;
 		nextGameText = null;
 		clearHud();
+		lastBlueKills = -1;
+		lastRedKills = -1;
 		rewardShopOpen = false;
 		statusModel = Collections.emptyList();
 	}

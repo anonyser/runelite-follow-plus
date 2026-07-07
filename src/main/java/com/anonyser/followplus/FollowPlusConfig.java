@@ -41,6 +41,13 @@ public interface FollowPlusConfig extends Config
 	)
 	String MATCH = "match";
 
+	@ConfigSection(
+		name = "Session record",
+		description = "Your win/loss and team record across this session's games.",
+		position = 4
+	)
+	String SESSION = "session";
+
 	// ----- Display -----
 
 	@ConfigItem(
@@ -359,6 +366,35 @@ public interface FollowPlusConfig extends Config
 		section = MATCH
 	)
 	default boolean showLobbyInfo()
+	{
+		return true;
+	}
+
+	// ----- Session record -----
+
+	@ConfigItem(
+		keyName = "showSessionRecord",
+		name = "Session win/loss",
+		description = "Show your win/loss record for the games you<br>"
+			+ "have finished this session, e.g. 3W / 1L.",
+		position = 0,
+		section = SESSION
+	)
+	default boolean showSessionRecord()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showTeamComposition",
+		name = "Team composition this session",
+		description = "Show this session's record split by team and<br>"
+			+ "result: red wins / red losses / blue wins /<br>"
+			+ "blue losses (RW / RL / BW / BL).",
+		position = 1,
+		section = SESSION
+	)
+	default boolean showTeamComposition()
 	{
 		return true;
 	}
